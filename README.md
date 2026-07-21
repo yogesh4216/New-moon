@@ -5,7 +5,6 @@
 | Network  | Address                          |
 |----------|----------------------------------|
 | Preview  | `9c5d4d5021efa9f668825dfd13833ba62d5936597407aa46e1bf670fb68e3b63` |
-| Preprod  | [PASTE ADDRESS AFTER DEPLOY]     |
 
 ## What This Does
 This contract maintains a public counter on the Midnight blockchain. Users can increment this counter by a specific amount. The exact amount is initially passed as a private witness (meaning it starts off hidden), but the contract logic deliberately discloses it to add it to the public total. This serves as a basic demonstration of Midnight's data privacy mechanisms, specifically how to mix public and private state using the `disclose()` function.
