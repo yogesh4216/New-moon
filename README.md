@@ -49,7 +49,7 @@ npm run test
 ```
 
 ## Initial Idea
-[LEAVE PLACEHOLDER — I will fill this in manually]
+The initial product idea for this counter contract is to serve as the foundational logic for a decentralized voting or ticketing system. In such a system, the `increment_amount` could represent the number of votes or tickets a user is purchasing. The user keeps their individual transaction amount private during the proof generation, only disclosing it to the public ledger to update the global count. This ensures the smart contract accurately tracks the global state while preserving the confidentiality of the individual user's input until they explicitly consent to its disclosure.
 
 ## Screenshots
 [LEAVE PLACEHOLDER — I will add compile output and contract address screenshots]
