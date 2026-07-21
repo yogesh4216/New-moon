@@ -1,0 +1,26 @@
+// -----------------------------------------------------------------------------
+// PRIVACY MODEL:
+// PUBLIC:
+//   - 'count': A public counter stored on the ledger state, visible to anyone.
+// PRIVATE:
+//   - 'increment_amount': A private witness passed as a circuit input.
+// DISCLOSE:
+//   - We use disclose(increment_amount) deliberately to reveal the private
+//     input so that we can update the public 'count' ledger state.
+// -----------------------------------------------------------------------------
+
+pragma language_version >= 0.14.0;
+
+import CompactStandardLibrary;
+
+export ledger count: Uint<32>;
+
+export circuit initialize(initial_count: Uint<32>): [] {
+    count = disclose(initial_count);
+}
+
+export circuit increment(increment_amount: Uint<32>): [] {
+    // The amount to increment by is passed as a private witness.
+    // We deliberately disclose it so we can perform math with the public state.
+    count = (count + disclose(increment_amount)) as Uint<32>;
+}
