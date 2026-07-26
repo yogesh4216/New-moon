@@ -2,7 +2,7 @@
 > A decentralized ticketing and voting prototype proving operations without revealing user inputs.
 
 ## Live Demo
-[PASTE LIVE URL AFTER DEPLOYING FRONTEND]
+https://my-project-two-kappa-70.vercel.app
 
 ## Contract Address
 | Network  | Address                          |
@@ -44,4 +44,4 @@ Midnight network, Compact, Midnight.js SDK, React/Vite, Lace wallet
 4. Open the displayed `localhost` URL in your browser with the Lace wallet extension active.
 
 ## Demo Video
-[PLACEHOLDER — I will add the link after recording]
+https://youtu.be/dus3GqbnOOY

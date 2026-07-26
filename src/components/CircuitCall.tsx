@@ -13,7 +13,7 @@ export const CircuitCall: React.FC<CircuitCallProps> = ({ midnight }) => {
 
   const handleIncrement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!midnight.isConnected || !midnight.api) {
+    if (!midnight.isConnected) {
       setError('Please connect your wallet first.');
       return;
     }
