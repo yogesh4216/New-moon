@@ -222,6 +222,47 @@ rm -rf node_modules package-lock.json && npm install
 node -v          # confirm v22.x before retrying
 ```
 
+**Sync stuck at `0/0` — find out why**
+
+```bash
+npm run diagnose-indexer preprod
+```
+
+`check-endpoints` only proves a socket opens. This asks the indexer for the
+chain height over HTTPS and opens a real `graphql-transport-ws` subscription,
+because `highestTransactionId` — the value whose staying at 0 means sync never
+starts — comes from the **indexer**, not the RPC node. The repeating
+`subscribeRuntimeVersion ... Normal Closure` lines are the RPC node and are a
+red herring for this failure.
+
+It distinguishes the two causes that actually matter:
+
+- **GraphQL errors / subscription rejected** → API-version or schema mismatch
+  between the SDK and what the network currently serves. Not fixable by
+  changing Node.
+- **Both transports serve data fine** → the indexer is healthy, so suspect the
+  Node version or the SDK/network version pairing.
+
+**Installing Node 22 without nvm**
+
+`nvm` is not installed by default on macOS. Either install it, or use Homebrew:
+
+```bash
+brew install node@22
+brew link --overwrite --force node@22
+node -v      # v22.x
+```
+
+Or with nvm:
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+exec $SHELL -l
+nvm install 22 && nvm use 22
+```
+
+After switching: `rm -rf node_modules package-lock.json && npm install`
+
 **Telling "slow sync" apart from "not syncing"**
 Read the progress line:
 
