@@ -23,7 +23,8 @@
     "prebuild": "node scripts/copy-zk-artifacts.mjs",
     "address": "tsx src/show-address.ts",
     "check-endpoints": "node scripts/check-endpoints.mjs",
-    "diagnose-indexer": "node scripts/diagnose-indexer.mjs"
+    "diagnose-indexer": "node scripts/diagnose-indexer.mjs",
+    "diagnose-sync": "tsx src/diagnose-sync.ts"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.16.0",

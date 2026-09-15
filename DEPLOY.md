@@ -263,6 +263,26 @@ nvm install 22 && nvm use 22
 
 After switching: `rm -rf node_modules package-lock.json && npm install`
 
+**Sync still `0/0` after check-endpoints and diagnose-indexer both pass**
+
+```bash
+npm run diagnose-sync
+```
+
+`diagnose-indexer` subscribes to `blocks`, which proves the indexer is alive
+but not that it serves the *wallet's* operations. This runs the exact
+subscriptions the SDK issues — `ZswapEvents`, `DustLedgerEvents` and
+`UnshieldedTransactions` — one at a time and prints each error verbatim.
+
+`UnshieldedTransactions` is the one that matters: it yields
+`UnshieldedTransactionsProgress { highestTransactionId }`, which is precisely
+the value stuck at 0. If it is rejected, sync cannot start, and no amount of
+waiting or retrying changes that.
+
+Errors mentioning unknown fields, unknown types, or validation failures mean
+the SDK and the network are on different schema versions. That is fixed by
+aligning versions, not by changing Node.
+
 **Telling "slow sync" apart from "not syncing"**
 Read the progress line:
 
