@@ -6,13 +6,24 @@
  * `progress` with `appliedId`, `highestTransactionId` and `isConnected`, which
  * is enough to show how far along each one is and to notice when nothing has
  * moved for a while.
+ *
+ * Two rules this module follows, both learned the hard way:
+ *
+ *  - Never do BigInt arithmetic on these values. They are *declared* bigint but
+ *    arrive as plain numbers at runtime, and `0n + 1` throws a TypeError.
+ *    Everything is coerced through `toNum` and kept in Number space; this is a
+ *    progress bar, so the precision loss past 2^53 does not matter.
+ *  - Never let reporting break the thing being reported on. `render` is a
+ *    cosmetic side effect running on a timer — if it throws, the deploy dies
+ *    with a stack trace from the progress bar rather than a real error. It is
+ *    wrapped, and a persistent failure disables reporting rather than the sync.
  */
 import type { Observable, Subscription } from 'rxjs';
 
 type ChildProgress = {
-  appliedId: bigint;
-  highestTransactionId: bigint;
-  isConnected: boolean;
+  appliedId: unknown;
+  highestTransactionId: unknown;
+  isConnected: unknown;
 };
 
 /**
@@ -27,10 +38,23 @@ type FacadeLike = {
 const KINDS = ['shielded', 'unshielded', 'dust'] as const;
 type Kind = (typeof KINDS)[number];
 
-const pct = (p: ChildProgress): string => {
-  if (p.highestTransactionId <= 0n) return '—';
-  const ratio = Number((p.appliedId * 1000n) / p.highestTransactionId) / 10;
-  return `${Math.min(ratio, 100).toFixed(1)}%`;
+/** Accepts bigint, number or numeric string; anything else becomes 0. */
+export const toNum = (v: unknown): number => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'bigint') return Number(v);
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+};
+
+/** Percentage applied, or "—" when the chain height is not yet known. */
+export const formatPct = (p: ChildProgress): string => {
+  const applied = toNum(p.appliedId);
+  const highest = toNum(p.highestTransactionId);
+  if (highest <= 0) return '—';
+  return `${Math.min((applied / highest) * 100, 100).toFixed(1)}%`;
 };
 
 export interface SyncReporter {
@@ -42,15 +66,17 @@ export interface SyncReporter {
 
 export const reportSyncProgress = (
   wallet: FacadeLike,
-  opts: { stallWarningMs?: number } = {},
+  opts: { stallWarningMs?: number; intervalMs?: number } = {},
 ): SyncReporter => {
   const stallWarningMs = opts.stallWarningMs ?? 120_000;
+  const intervalMs = opts.intervalMs ?? 5000;
   const start = Date.now();
 
   const latest: Partial<Record<Kind, ChildProgress>> = {};
-  let lastAppliedTotal = -1n;
+  let lastAppliedTotal = -1;
   let lastMovementAt = Date.now();
   let warnedStall = false;
+  let renderFailures = 0;
 
   let sub: Subscription | undefined;
   try {
@@ -67,19 +93,19 @@ export const reportSyncProgress = (
     // If the observable is unavailable we still show elapsed time below.
   }
 
-  const render = () => {
+  const renderOnce = () => {
     const elapsed = Math.round((Date.now() - start) / 1000);
 
     const parts: string[] = [];
-    let appliedTotal = 0n;
+    let appliedTotal = 0;
     let connected = false;
 
     for (const kind of KINDS) {
       const p = latest[kind];
       if (!p) continue;
-      appliedTotal += p.appliedId;
-      connected = connected || p.isConnected;
-      parts.push(`${kind[0]}:${pct(p)}`);
+      appliedTotal += toNum(p.appliedId);
+      connected = connected || p.isConnected === true;
+      parts.push(`${kind[0]}:${formatPct(p)}`);
     }
 
     if (appliedTotal !== lastAppliedTotal) {
@@ -89,7 +115,7 @@ export const reportSyncProgress = (
     }
 
     const detail = parts.length > 0 ? parts.join(' ') : 'waiting for first update';
-    const link = parts.length > 0 ? (connected ? '' : ' [disconnected]') : '';
+    const link = parts.length > 0 && !connected ? ' [disconnected]' : '';
     process.stdout.write(`\r  ⏳ syncing ${elapsed}s — ${detail}${link}          `);
 
     const stalledFor = Date.now() - lastMovementAt;
@@ -97,24 +123,42 @@ export const reportSyncProgress = (
       warnedStall = true;
       process.stdout.write(
         `\n  ⚠ No progress for ${Math.round(stalledFor / 1000)}s. ` +
-          `If this persists the indexer or RPC may be unreachable — see DEPLOY.md.\n`,
+          `Run \`npm run check-endpoints\` in another terminal — see DEPLOY.md.\n`,
       );
     }
   };
 
-  const timer = setInterval(render, 5000);
+  const render = () => {
+    try {
+      renderOnce();
+    } catch (err) {
+      // Reporting is cosmetic; it must never take the sync down with it.
+      renderFailures += 1;
+      if (renderFailures === 1) {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stdout.write(`\n  (progress display unavailable: ${msg})\n`);
+      }
+      if (renderFailures >= 3) clearInterval(timer);
+    }
+  };
+
+  const timer = setInterval(render, intervalMs);
   render();
 
   return {
     stop() {
       clearInterval(timer);
-      sub?.unsubscribe();
+      try {
+        sub?.unsubscribe();
+      } catch {
+        // already torn down
+      }
       process.stdout.write('\r' + ' '.repeat(78) + '\r');
     },
     summary() {
       const parts = KINDS.filter((k) => latest[k]).map((k) => {
         const p = latest[k]!;
-        return `${k} ${p.appliedId}/${p.highestTransactionId}`;
+        return `${k} ${toNum(p.appliedId)}/${toNum(p.highestTransactionId)}`;
       });
       return parts.length > 0 ? parts.join(', ') : 'no progress reported';
     },
