@@ -145,6 +145,12 @@ Preprod, then click **Connect Wallet**.
 
 ## Deploy to Preprod
 
+See **[DEPLOY.md](./DEPLOY.md)** for the full checklist, or run:
+
+```bash
+bash scripts/deploy-preprod.sh
+```
+
 The contract must be deployed from a machine with Docker and network access to
 the Preprod endpoints.
 
