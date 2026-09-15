@@ -1,0 +1,25 @@
+{
+  "// note": "Level 1 CLI tooling (deploy, setup, wallet, cli). Executed through tsx, which strips types rather than checking them. Kept separate from the browser build and deliberately less strict.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": false,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"],
+    "lib": ["ES2022"]
+  },
+  "include": [
+    "src/cli.ts",
+    "src/deploy.ts",
+    "src/deploy-counter.ts",
+    "src/setup.ts",
+    "src/network.ts",
+    "src/wallet.ts",
+    "src/wallet-state.ts",
+    "src/check-balance.ts"
+  ]
+}

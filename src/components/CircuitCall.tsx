@@ -1,134 +1,155 @@
-import React, { useState } from 'react';
-import { MidnightState } from '../hooks/useMidnight';
+import React, { useCallback, useEffect, useState } from 'react';
+import type { MidnightState } from '../hooks/useMidnight';
+import { callIncrement, readCount, type IncrementResult } from '../lib/counterContract';
+import { CONTRACT_ADDRESS, isContractConfigured } from '../config';
 
 interface CircuitCallProps {
   midnight: MidnightState;
 }
 
-export const CircuitCall: React.FC<CircuitCallProps> = ({ midnight }) => {
-  const [incrementAmount, setIncrementAmount] = useState('');
-  const [isProving, setIsProving] = useState(false);
-  const [txResult, setTxResult] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+type Phase = 'idle' | 'working';
 
-  const handleIncrement = async (e: React.FormEvent) => {
+export const CircuitCall: React.FC<CircuitCallProps> = ({ midnight }) => {
+  // Held only for the duration of the call, then cleared. Never rendered back,
+  // never logged, never included in the result panel.
+  const [amount, setAmount] = useState('');
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [result, setResult] = useState<IncrementResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [publicCount, setPublicCount] = useState<bigint | null>(null);
+
+  const configured = isContractConfigured();
+  const busy = phase !== 'idle';
+
+  const refreshCount = useCallback(async () => {
+    if (!midnight.providers || !configured) return;
+    try {
+      setPublicCount(await readCount(midnight.providers));
+    } catch {
+      setPublicCount(null);
+    }
+  }, [midnight.providers, configured]);
+
+  useEffect(() => {
+    void refreshCount();
+  }, [refreshCount]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!midnight.isConnected) {
-      setError('Please connect your wallet first.');
+    setError(null);
+    setResult(null);
+
+    if (!midnight.isConnected || !midnight.providers) {
+      setError('Connect your Lace wallet first.');
+      return;
+    }
+    if (!configured) {
+      setError('No contract address configured. Set VITE_CONTRACT_ADDRESS and rebuild.');
+      return;
+    }
+
+    const parsed = Number(amount);
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 4294967295) {
+      setError('Enter a whole number between 1 and 4294967295.');
       return;
     }
 
     try {
-      setError(null);
-      setTxResult(null);
-      setIsProving(true);
-
-      const amount = parseInt(incrementAmount, 10);
-      if (isNaN(amount) || amount <= 0) {
-        throw new Error('Please enter a valid positive number.');
-      }
-
-      // ---------------------------------------------------------
-      // MIDNIGHT SDK INTEGRATION
-      // Here is where the local ZK proof generation happens!
-      // The `increment_amount` is used as a PRIVATE WITNESS in the
-      // local browser environment. It is never sent to a server.
-      // 
-      // Example implementation (pseudo-code depending on setup):
-      // const deployedContract = await initializeContract(midnight.api);
-      // const tx = await deployedContract.callTx.increment(amount);
-      // setTxResult(tx);
-      // ---------------------------------------------------------
-      
-      // Simulate proof generation time (ZK proofs take time!)
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      
-      // Simulate successful transaction result
-      setTxResult({
-        status: 'Success',
-        txId: '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
-        blockHeight: Math.floor(Math.random() * 1000) + 10000,
-        message: `Successfully incremented by ${amount}`
-      });
-
-    } catch (err: any) {
-      console.error('Transaction failed:', err);
-      setError(err.message || 'Failed to submit transaction.');
+      setPhase('working');
+      // Proving and submission both happen inside this call: the wallet proves
+      // locally, balances the transaction, then relays it to the network.
+      const res = await callIncrement(midnight.providers, BigInt(parsed));
+      setResult(res);
+      setPublicCount(res.countAfter);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setIsProving(false);
-      // Clear the private input immediately for security
-      setIncrementAmount('');
+      setPhase('idle');
+      setAmount(''); // clear the private input as soon as the call ends
     }
   };
 
   return (
     <div className="glass-panel">
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-          Interact with Contract
-        </h2>
-        <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-          Call the `increment` circuit on your deployed contract.
+      <div className="panel-head-block">
+        <h2 className="panel-title">Call the <code>increment</code> circuit</h2>
+        <p className="panel-sub">
+          Contract <span className="mono-inline">{CONTRACT_ADDRESS || 'not configured'}</span> on{' '}
+          {midnight.networkId}
         </p>
       </div>
 
-      <div className="privacy-notice" style={{ marginBottom: '1.5rem' }}>
-        <div className="privacy-notice-icon">🛡️</div>
-        <div className="privacy-notice-text">
-          <strong>Privacy Claim:</strong> The amount you enter below is a <em>private witness</em>. 
-          The zero-knowledge proof is generated locally in your browser. 
-          An on-chain observer will only see the proof and the final disclosed state update, 
-          but they cannot see the inputs while they are being processed here.
+      <div className="stat-row">
+        <div className="stat">
+          <span className="stat-label">Public counter (on-chain)</span>
+          <span className="stat-value">{publicCount === null ? '—' : publicCount.toString()}</span>
         </div>
       </div>
 
-      <form onSubmit={handleIncrement}>
+      <div className="privacy-notice">
+        <div className="privacy-notice-icon">🛡️</div>
+        <div className="privacy-notice-text">
+          The amount below is a <strong>private circuit input</strong>. The zero-knowledge proof is
+          generated on this device by your Lace wallet. It is never displayed here after you submit,
+          never logged, and never sent to any server we run.
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit}>
         <div className="input-group">
-          <label htmlFor="incrementAmount">Increment Amount (Private Input)</label>
+          <label htmlFor="amount">Increment amount (private input)</label>
           <input
+            id="amount"
             type="password"
-            id="incrementAmount"
-            value={incrementAmount}
-            onChange={(e) => setIncrementAmount(e.target.value)}
-            placeholder="Enter amount to increment..."
-            disabled={isProving || !midnight.isConnected}
+            inputMode="numeric"
+            autoComplete="off"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Enter an amount…"
+            disabled={busy || !midnight.isConnected}
           />
         </div>
 
-        <button 
-          type="submit" 
-          className="btn" 
-          style={{ width: '100%' }}
-          disabled={isProving || !midnight.isConnected || !incrementAmount}
+        <button
+          type="submit"
+          className="btn btn-full"
+          disabled={busy || !midnight.isConnected || !amount || !configured}
         >
-          {isProving ? (
+          {busy ? (
             <>
-              <div className="loading-spinner"></div>
-              Generating ZK Proof locally...
+              <span className="loading-spinner" />
+              Generating proof locally, then submitting…
             </>
           ) : (
-            'Call Circuit (Proved without revealing your input)'
+            'Call circuit'
           )}
         </button>
+        <p className="proof-label">Proved without revealing your input</p>
       </form>
 
       {error && (
-        <div style={{ marginTop: '1rem', color: 'var(--error)', fontSize: '0.875rem' }}>
-          ⚠️ {error}
+        <div className="notice notice-error">
+          <strong>⚠️ {error}</strong>
         </div>
       )}
 
-      {txResult && (
+      {result && (
         <div className="tx-result">
-          <h3 style={{ fontSize: '1rem', color: 'var(--success)', marginBottom: '0.5rem' }}>
-            ✅ Transaction Submitted
-          </h3>
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-            The proof was verified on-chain and the state was updated!
+          <h3 className="tx-result-title">✅ Transaction submitted</h3>
+          <dl className="tx-grid">
+            <dt>Transaction hash</dt>
+            <dd className="mono-value">{result.txHash || '—'}</dd>
+            <dt>Transaction id</dt>
+            <dd className="mono-value">{result.txId || '—'}</dd>
+            <dt>Block height</dt>
+            <dd>{result.blockHeight ?? '—'}</dd>
+            <dt>Public counter after</dt>
+            <dd>{result.countAfter?.toString() ?? '—'}</dd>
+          </dl>
+          <p className="tx-note">
+            Your input is not in this panel, and it is not in the transaction — only the proof and
+            the resulting public state are on-chain.
           </p>
-          <pre>
-{JSON.stringify(txResult, null, 2)}
-          </pre>
         </div>
       )}
     </div>

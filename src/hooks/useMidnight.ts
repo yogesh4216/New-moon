@@ -1,86 +1,135 @@
-import { useState, useEffect, useCallback } from 'react';
-import { DAppConnectorAPI } from '@midnight-ntwrk/dapp-connector-api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
+import {
+  WalletError,
+  type WalletErrorKind,
+  connectWallet,
+  isWalletInstalled,
+  readAddress,
+} from '../lib/wallet';
+import { buildProviders } from '../lib/providers';
+import { NETWORK_ID } from '../config';
 
 export interface MidnightState {
   isConnected: boolean;
+  isConnecting: boolean;
   address: string | null;
+  networkId: string;
+  walletInstalled: boolean;
   error: string | null;
+  errorKind: WalletErrorKind | null;
+  /** Midnight.js providers, available only while connected. */
+  providers: unknown | null;
   connect: () => Promise<void>;
   disconnect: () => void;
-  api: any | null; // Wallet API instance from Lace
 }
 
 export function useMidnight(): MidnightState {
-  const [isConnected, setIsConnected] = useState(false);
+  const [wallet, setWallet] = useState<ConnectedAPI | null>(null);
+  const [providers, setProviders] = useState<unknown | null>(null);
   const [address, setAddress] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [api, setApi] = useState<any | null>(null);
+  const [errorKind, setErrorKind] = useState<WalletErrorKind | null>(null);
+  const [walletInstalled, setWalletInstalled] = useState(false);
 
-  const connect = useCallback(async () => {
-    try {
-      setError(null);
-      // Check if Midnight Lace is injected
-      const midnightObj = (window as any).midnight;
-      
-      // If Lace is missing, just fallback to a mock connection so the UI works!
-      if (!midnightObj || !midnightObj.mnLace) {
-        console.warn('Lace wallet not detected. Falling back to mock connection for demo purposes.');
-        setAddress('mn_addr_preview15qgrd687eltl97c7vzctpjuznwcpun7vy53t0sv5hn4w29c0t6sqslvjal');
-        setIsConnected(true);
-        return;
-      }
-
-      // Request connection to Lace
-      const laceConnector = midnightObj.mnLace as DAppConnectorAPI;
-      const isEnabled = await laceConnector.isEnabled();
-      
-      const walletApi = await laceConnector.enable();
-      
-      if (!walletApi) {
-        throw new Error('User rejected the connection request.');
-      }
-
-      const state = await walletApi.state();
-      
-      setApi(walletApi);
-      setAddress(state.address || 'Connected Address Hidden/TBD');
-      setIsConnected(true);
-
-    } catch (err: any) {
-      console.error('Failed to connect to Midnight:', err);
-      setError(err.message || 'An unknown error occurred during connection.');
-      setIsConnected(false);
-    }
+  // Extensions inject on document load, which can land after React mounts.
+  useEffect(() => {
+    const check = () => setWalletInstalled(isWalletInstalled());
+    check();
+    const timer = window.setInterval(check, 500);
+    const stop = window.setTimeout(() => window.clearInterval(timer), 5000);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(stop);
+    };
   }, []);
 
   const disconnect = useCallback(() => {
-    setIsConnected(false);
+    setWallet(null);
+    setProviders(null);
     setAddress(null);
-    setApi(null);
     setError(null);
+    setErrorKind(null);
   }, []);
 
-  // Optionally auto-check on mount
+  const connect = useCallback(async () => {
+    setIsConnecting(true);
+    setError(null);
+    setErrorKind(null);
+    try {
+      const api = await connectWallet(NETWORK_ID);
+
+      // Ask up front for the permissions this dApp needs, so the user sees one
+      // prompt rather than one per action mid-flow.
+      await api
+        .hintUsage([
+          'getShieldedAddresses',
+          'getConfiguration',
+          'getProvingProvider',
+          'balanceUnsealedTransaction',
+          'submitTransaction',
+        ])
+        .catch(() => undefined);
+
+      const walletAddress = await readAddress(api);
+      const built = await buildProviders(api, walletAddress);
+
+      setWallet(api);
+      setAddress(walletAddress);
+      setProviders(built);
+    } catch (e) {
+      const we =
+        e instanceof WalletError
+          ? e
+          : new WalletError('unknown', e instanceof Error ? e.message : String(e));
+      setError(we.message);
+      setErrorKind(we.kind);
+      setWallet(null);
+      setProviders(null);
+      setAddress(null);
+    } finally {
+      setIsConnecting(false);
+    }
+  }, []);
+
+  // Drop local state if the wallet disconnects or switches networks under us.
   useEffect(() => {
-    const checkConnection = async () => {
-      const midnightObj = (window as any).midnight;
-      if (midnightObj?.mnLace) {
-        const isEnabled = await midnightObj.mnLace.isEnabled();
-        if (isEnabled) {
-          // You could automatically re-enable here, but for security 
-          // it's often better to wait for a user click.
+    if (!wallet) return;
+    const poll = window.setInterval(async () => {
+      try {
+        const status = await wallet.getConnectionStatus();
+        if (status.status !== 'connected') {
+          disconnect();
+          setError('The wallet disconnected.');
+          setErrorKind('disconnected');
+        } else if (status.networkId !== NETWORK_ID) {
+          disconnect();
+          setError(
+            `Wallet switched to "${status.networkId}" but this dApp targets "${NETWORK_ID}".`,
+          );
+          setErrorKind('network-mismatch');
         }
+      } catch {
+        // transient; next tick will retry
       }
-    };
-    checkConnection();
-  }, []);
+    }, 4000);
+    return () => window.clearInterval(poll);
+  }, [wallet, disconnect]);
 
-  return {
-    isConnected,
-    address,
-    error,
-    connect,
-    disconnect,
-    api
-  };
+  return useMemo(
+    () => ({
+      isConnected: wallet !== null && providers !== null,
+      isConnecting,
+      address,
+      networkId: NETWORK_ID,
+      walletInstalled,
+      error,
+      errorKind,
+      providers,
+      connect,
+      disconnect,
+    }),
+    [wallet, providers, isConnecting, address, walletInstalled, error, errorKind, connect, disconnect],
+  );
 }

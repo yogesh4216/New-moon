@@ -1,2 +1,13 @@
-.vercel
 node_modules/
+dist/
+.vercel
+.env
+.env.local
+
+# Wallet seeds and local chain/wallet state — MUST NOT be committed.
+.midnight-state.json
+.midnight-wallet-state/
+midnight-level-db/
+
+# Generated at build time from managed/
+public/managed/
