@@ -21,7 +21,8 @@
     "proof-server:stop": "docker compose down",
     "clean": "rm -rf dist node_modules/.vite",
     "predev": "node scripts/copy-zk-artifacts.mjs",
-    "prebuild": "node scripts/copy-zk-artifacts.mjs"
+    "prebuild": "node scripts/copy-zk-artifacts.mjs",
+    "address": "tsx src/show-address.ts"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.16.0",

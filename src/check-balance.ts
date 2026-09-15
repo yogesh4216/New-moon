@@ -2,11 +2,13 @@
  * Check wallet balance on the local Midnight devnet
  */
 import { WebSocket } from 'ws';
+import { inspect } from 'node:util';
 
 // Midnight SDK imports
 import { resolveNetwork, getOrCreateSeed } from './network';
 // unshieldedToken is re-exported from ./wallet (originally @midnight-ntwrk/midnight-js-protocol/ledger).
 import { createWallet, persistWalletState, unshieldedToken } from './wallet';
+import { reportSyncProgress } from './sync-progress';
 
 // Enable WebSocket for GraphQL subscriptions
 // @ts-expect-error Required for wallet sync
@@ -18,6 +20,18 @@ const { network, config: networkConfig } = resolveNetwork();
 const SEED = getOrCreateSeed(network);
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
+
+/**
+ * The wallet SDK surfaces failures as Effect-tagged objects rather than Errors,
+ * so `String(err)` and `err.message` both collapse to "[object Object]". Dig out
+ * something actionable instead.
+ */
+function describeError(error: unknown): string {
+  if (error instanceof Error && error.message && error.message !== '[object Object]') {
+    return error.message;
+  }
+  return inspect(error, { depth: 4, colors: false });
+}
 
 async function main() {
   console.log('\n╔══════════════════════════════════════════════════════════════╗');
@@ -32,25 +46,34 @@ async function main() {
       console.log(`  Restored ${restoredCount}/3 child wallets from .midnight-wallet-state — sync will resume from saved point.`);
     }
 
+    // Print this before syncing: it is derived from the seed, so it is already
+    // known, and on a fresh public-network wallet the sync below can take a
+    // long time. Anyone who just needs a faucet target can stop reading here.
+    const address = walletCtx.unshieldedKeystore.getBech32Address();
+    console.log(`\n  Address: ${address}`);
+    console.log(`  Network: ${networkConfig.networkId}`);
+    if (networkConfig.faucet) {
+      console.log(`  Faucet:  ${networkConfig.faucet}`);
+    }
+    console.log('');
+
     console.log('  Syncing with network...');
     console.log('  ℹ  This may take several minutes depending on network size.');
     console.log('     RPC disconnection messages during sync are normal and can be safely ignored.\n');
-    const syncStart = Date.now();
-    const syncInterval = setInterval(() => {
-      const elapsed = Math.round((Date.now() - syncStart) / 1000);
-      process.stdout.write(`\r  ⏳ Still syncing... (${elapsed}s elapsed)   `);
-    }, 5000);
-    const state = await walletCtx.wallet.waitForSyncedState();
-    clearInterval(syncInterval);
-    process.stdout.write('\r  ✓ Synced with network.                                      \n');
+    const reporter = reportSyncProgress(walletCtx.wallet);
+    let state;
+    try {
+      state = await walletCtx.wallet.waitForSyncedState();
+    } catch (err) {
+      reporter.stop();
+      console.error(`\n❌ Sync failed at: ${reporter.summary()}`);
+      throw err;
+    }
+    reporter.stop();
+    console.log('  ✓ Synced with network.\n');
 
-    const address = walletCtx.unshieldedKeystore.getBech32Address();
     const tNightBalance = state.unshielded.balances[unshieldedToken().raw] ?? 0n;
     const dustBalance = state.dust.balance(new Date());
-
-    console.log('\n─── Wallet Details ─────────────────────────────────────────────\n');
-    console.log(`  Address: ${address}`);
-    console.log(`  Network: ${networkConfig.networkId}\n`);
 
     console.log('─── Balances ───────────────────────────────────────────────────\n');
     console.log(`  tNight: ${tNightBalance.toLocaleString()}`);
@@ -74,7 +97,7 @@ async function main() {
     await persistWalletState(network, walletCtx);
     await walletCtx.wallet.stop();
   } catch (error) {
-    console.error('\n❌ Error:', error instanceof Error ? error.message : error);
+    console.error('\n❌ Error:', describeError(error));
     process.exit(1);
   }
 }

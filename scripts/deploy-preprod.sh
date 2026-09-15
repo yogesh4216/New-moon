@@ -71,18 +71,20 @@ curl -sS --max-time 3 -o /dev/null "http://127.0.0.1:6300" 2>/dev/null \
   || die "Proof server never came up on :6300. Check: docker compose logs proof-server"
 
 
+# The address comes from the seed, so it needs no chain sync. Deliberately not
+# `check-balance` here: that only prints the address after waitForSyncedState()
+# resolves, which on a fresh public-network wallet can take a very long time.
 say "Your preprod wallet"
-npm run --silent check-balance
+npm run --silent address
 
 cat <<'EOF'
-
   ─────────────────────────────────────────────────────────────
-  Fund the address printed above from the Preprod faucet:
-      https://midnight-tmnight-preprod.nethermind.dev
-  Wait for the balance to appear, then continue.
+  Fund the address above from the Preprod faucet, then continue.
+  The wallet sync happens during deploy, so there is no need to
+  wait for a balance to show up here first.
   ─────────────────────────────────────────────────────────────
 EOF
-read -r -p "  Press Enter once the wallet is funded… "
+read -r -p "  Press Enter once you have requested faucet funds… "
 
 say "Deploying to preprod (this generates proofs — it takes a few minutes)"
 npm run deploy -- --network preprod

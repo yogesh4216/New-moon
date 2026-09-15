@@ -58,14 +58,12 @@ npm run network preprod
 # 3. Start the proof server (Docker)
 npm run proof-server:start
 
-# 4. Print your new wallet address
-npm run check-balance
+# 4. Print your new wallet address (instant — no chain sync)
+npm run address
 
 # 5. Fund it: https://midnight-tmnight-preprod.nethermind.dev
-#    Re-run check-balance until the balance is non-zero.
-npm run check-balance
 
-# 6. Deploy — prints the Preprod contract address
+# 6. Deploy — syncs the wallet, then prints the Preprod contract address
 npm run deploy -- --network preprod
 ```
 
@@ -144,6 +142,26 @@ git push
 ---
 
 ## Troubleshooting
+
+**Sync runs for many minutes / `Wallet.Sync: [object Object]`**
+A fresh wallet on a public network replays a lot of history, so the first sync
+is genuinely slow — but it should be *moving*. Both `check-balance` and `deploy`
+now print live per-wallet progress:
+
+```
+⏳ syncing 240s — s:82.1% u:99.4% d:11.7%
+```
+
+`s`/`u`/`d` are the shielded, unshielded and dust wallets. If those percentages
+climb, it is working; leave it. If nothing moves for two minutes you get an
+explicit stall warning, and `[disconnected]` appears when the indexer link drops.
+
+You do **not** need a completed sync to find your funding address — `npm run
+address` derives it from the seed with no network access at all.
+
+If it is genuinely stuck, the usual causes are a proof server that is not
+running, a firewall blocking `wss://rpc.preprod.midnight.network`, or Node 25
+(see below).
 
 **`SharedArrayBuffer is not defined` / proving hangs in the browser**
 The page is not cross-origin isolated. `vercel.json` and `netlify.toml` already
