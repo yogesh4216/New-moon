@@ -22,8 +22,16 @@ test('formatPct never throws on mixed numeric types', () => {
   assert.equal(formatPct({ appliedId: '50', highestTransactionId: '100', isConnected: true }), '50.0%');
 });
 
-test('formatPct handles an unknown chain height and clamps overshoot', () => {
-  assert.equal(formatPct({ appliedId: 5, highestTransactionId: 0, isConnected: true }), '—');
+test('formatPct shows raw counters when the chain height is unknown', () => {
+  // "0/0" is deliberate: an unknown height means sync has not started, which is
+  // a different condition from a slow sync and must not look like a rounding
+  // artifact.
+  assert.equal(formatPct({ appliedId: 5, highestTransactionId: 0, isConnected: true }), '5/0');
+  assert.equal(formatPct({ appliedId: 0, highestTransactionId: 0, isConnected: true }), '0/0');
+  assert.equal(formatPct({ appliedId: 0, highestTransactionId: undefined, isConnected: true }), '0/0');
+});
+
+test('formatPct clamps overshoot', () => {
   assert.equal(formatPct({ appliedId: 150, highestTransactionId: 100, isConnected: true }), '100.0%');
 });
 

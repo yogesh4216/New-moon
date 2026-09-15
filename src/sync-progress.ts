@@ -49,13 +49,24 @@ export const toNum = (v: unknown): number => {
   return 0;
 };
 
-/** Percentage applied, or "—" when the chain height is not yet known. */
+/**
+ * Percentage applied once the chain height is known.
+ *
+ * While the height is still 0 this shows the raw counters instead. That case
+ * is not "slow" — it means the wallet has not learned the chain height at all,
+ * so sync cannot advance. Showing "0/0" makes that obvious; an earlier version
+ * printed a bare em dash, which read like a rounding artifact.
+ */
 export const formatPct = (p: ChildProgress): string => {
   const applied = toNum(p.appliedId);
   const highest = toNum(p.highestTransactionId);
-  if (highest <= 0) return '—';
+  if (highest <= 0) return `${applied}/0`;
   return `${Math.min((applied / highest) * 100, 100).toFixed(1)}%`;
 };
+
+/** True when no child wallet has learned the chain height yet. */
+const noChainHeight = (states: ChildProgress[]): boolean =>
+  states.length > 0 && states.every((p) => toNum(p.highestTransactionId) <= 0);
 
 export interface SyncReporter {
   /** Stop reporting and clear the status line. */
@@ -97,12 +108,14 @@ export const reportSyncProgress = (
     const elapsed = Math.round((Date.now() - start) / 1000);
 
     const parts: string[] = [];
+    const seen: ChildProgress[] = [];
     let appliedTotal = 0;
     let connected = false;
 
     for (const kind of KINDS) {
       const p = latest[kind];
       if (!p) continue;
+      seen.push(p);
       appliedTotal += toNum(p.appliedId);
       connected = connected || p.isConnected === true;
       parts.push(`${kind[0]}:${formatPct(p)}`);
@@ -121,10 +134,20 @@ export const reportSyncProgress = (
     const stalledFor = Date.now() - lastMovementAt;
     if (!warnedStall && stalledFor > stallWarningMs && parts.length > 0) {
       warnedStall = true;
-      process.stdout.write(
-        `\n  ⚠ No progress for ${Math.round(stalledFor / 1000)}s. ` +
-          `Run \`npm run check-endpoints\` in another terminal — see DEPLOY.md.\n`,
-      );
+      if (noChainHeight(seen)) {
+        process.stdout.write(
+          `\n  ⚠ After ${Math.round(stalledFor / 1000)}s no wallet has learned the chain height ` +
+            `(all showing 0/0).\n` +
+            `    This is not a slow sync — it is not starting. Waiting longer will not help.\n` +
+            `    Most likely cause: an unsupported Node version. Check with \`node -v\`;\n` +
+            `    the SDK targets Node 22 LTS. See DEPLOY.md.\n`,
+        );
+      } else {
+        process.stdout.write(
+          `\n  ⚠ No progress for ${Math.round(stalledFor / 1000)}s. ` +
+            `Run \`npm run check-endpoints\` in another terminal — see DEPLOY.md.\n`,
+        );
+      }
     }
   };
 

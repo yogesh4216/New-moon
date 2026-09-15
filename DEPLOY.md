@@ -210,12 +210,26 @@ and fails loudly if it never opens.
 
 **Node 25 (or any non-22 version)**
 `package.json` allows Node >= 22, but the Midnight SDK and its wasm deps are
-tested against Node 22 LTS. If you hit odd runtime failures:
+tested against Node 22 LTS. Node 23/25 are non-LTS lines.
+
+The clearest symptom is a sync that reports `s:0/0 u:0/0 d:0/0` indefinitely —
+all endpoints reachable, the RPC socket opening and closing with `1000 Normal
+Closure`, and the chain height never learned. Fix:
 
 ```bash
 nvm install 22 && nvm use 22
-rm -rf node_modules && npm install
+rm -rf node_modules package-lock.json && npm install
+node -v          # confirm v22.x before retrying
 ```
+
+**Telling "slow sync" apart from "not syncing"**
+Read the progress line:
+
+- `s:12.4% u:99.1% d:3.0%` — working. Percentages mean the chain height is
+  known and transactions are being applied. Leave it.
+- `s:0/0 u:0/0 d:0/0` — **not** working. The wallet never learned the chain
+  height, so there is nothing to make progress against. Waiting will not help;
+  this never becomes a percentage on its own.
 
 **Deploy fails with a balance error**
 The faucet has not landed yet. Re-run `npm run check-balance` and wait.
