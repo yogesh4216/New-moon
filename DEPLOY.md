@@ -165,5 +165,28 @@ It needs the `compact` CLI, which is separate from npm. You do not need it
 unless you change `contracts/counter.compact` — the compiled output in
 `managed/` is committed.
 
+**`ERR_MODULE_NOT_FOUND: Cannot find package '@midnight-ntwrk/...'`**
+Your `node_modules` predates a dependency change. Re-sync:
+
+```bash
+npm install
+```
+
+If it persists, clear and reinstall: `rm -rf node_modules package-lock.json && npm install`
+
+**`WARN[0000] No services to build`**
+Harmless. `docker compose` prints it when no service has a `build:` section —
+the proof server runs from a prebuilt image. The script now waits for port 6300
+and fails loudly if it never opens.
+
+**Node 25 (or any non-22 version)**
+`package.json` allows Node >= 22, but the Midnight SDK and its wasm deps are
+tested against Node 22 LTS. If you hit odd runtime failures:
+
+```bash
+nvm install 22 && nvm use 22
+rm -rf node_modules && npm install
+```
+
 **Deploy fails with a balance error**
 The faucet has not landed yet. Re-run `npm run check-balance` and wait.

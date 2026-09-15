@@ -16,9 +16,14 @@ die()  { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # ---------------------------------------------------------------- preflight
 say "Checking prerequisites"
 
-node -e 'process.exit(parseInt(process.versions.node) >= 22 ? 0 : 1)' \
-  || die "Node 22+ required (found $(node -v)). Try: nvm use 22"
+NODE_MAJOR=$(node -e 'process.stdout.write(process.versions.node.split(".")[0])')
+[ "$NODE_MAJOR" -ge 22 ] || die "Node 22+ required (found $(node -v)). Try: nvm use 22"
 echo "  node $(node -v)"
+if [ "$NODE_MAJOR" != "22" ]; then
+  warn "Node $NODE_MAJOR is not the version Midnight targets."
+  echo "  The SDK and its native/wasm deps are tested against Node 22 LTS."
+  echo "  If anything below fails oddly, retry with:  nvm install 22 && nvm use 22"
+fi
 
 docker info >/dev/null 2>&1 \
   || die "Docker is not running. Start Docker Desktop and re-run."
@@ -29,7 +34,10 @@ curl -sS --max-time 15 -o /dev/null \
   || die "Cannot reach indexer.preprod.midnight.network — check your network."
 echo "  preprod reachable"
 
-[ -d node_modules ] || { say "Installing dependencies"; npm install; }
+# Always sync: a node_modules from an earlier checkout can be missing packages
+# added since. npm is a no-op when it is already up to date.
+say "Syncing dependencies"
+npm install --no-audit --no-fund
 
 # ------------------------------------------------- retire compromised seeds
 # The seeds previously committed to this repository are public. If the old
@@ -50,7 +58,18 @@ say "Selecting the preprod network"
 npm run --silent network preprod
 
 say "Starting the proof server (docker)"
-npm run --silent proof-server:start
+npm run proof-server:start
+
+printf '  waiting for :6300 '
+for _ in $(seq 1 30); do
+  if curl -sS --max-time 2 -o /dev/null "http://127.0.0.1:6300" 2>/dev/null; then
+    printf ' ready\n'; break
+  fi
+  printf '.'; sleep 2
+done
+curl -sS --max-time 3 -o /dev/null "http://127.0.0.1:6300" 2>/dev/null \
+  || die "Proof server never came up on :6300. Check: docker compose logs proof-server"
+
 
 say "Your preprod wallet"
 npm run --silent check-balance
