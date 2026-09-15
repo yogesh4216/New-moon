@@ -12,8 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "setup": "tsx src/setup.ts",
-    "deploy": "tsx src/deploy.ts",
-    "deploy:counter": "tsx src/deploy-counter.ts",
+    "deploy": "tsx src/deploy-counter.ts",
     "cli": "tsx src/cli.ts",
     "check-balance": "tsx src/check-balance.ts",
     "network": "tsx src/network.ts",
@@ -22,7 +21,8 @@
     "clean": "rm -rf dist node_modules/.vite",
     "predev": "node scripts/copy-zk-artifacts.mjs",
     "prebuild": "node scripts/copy-zk-artifacts.mjs",
-    "address": "tsx src/show-address.ts"
+    "address": "tsx src/show-address.ts",
+    "check-endpoints": "node scripts/check-endpoints.mjs"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-runtime": "0.16.0",

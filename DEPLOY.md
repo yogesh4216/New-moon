@@ -159,9 +159,20 @@ explicit stall warning, and `[disconnected]` appears when the indexer link drops
 You do **not** need a completed sync to find your funding address — `npm run
 address` derives it from the seed with no network access at all.
 
-If it is genuinely stuck, the usual causes are a proof server that is not
-running, a firewall blocking `wss://rpc.preprod.midnight.network`, or Node 25
-(see below).
+If it is genuinely stuck, check the endpoints first:
+
+```bash
+npm run check-endpoints preprod
+```
+
+Sync needs three things reachable — the indexer over HTTPS, the indexer over
+WebSocket, and the RPC node over WebSocket. An HTTPS-only check is not enough:
+a proxy or VPN that allows HTTPS but blocks WebSocket upgrades produces exactly
+the repeating `disconnected ... 1000:: Normal Closure` loop, because the socket
+opens and is closed before sync can make progress.
+
+If the WebSocket rows fail while HTTPS passes, that is your cause — try a
+different network, or disable the VPN/proxy for this host.
 
 **`SharedArrayBuffer is not defined` / proving hangs in the browser**
 The page is not cross-origin isolated. `vercel.json` and `netlify.toml` already

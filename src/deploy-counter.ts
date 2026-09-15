@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { resolveNetwork, getOrCreateSeed, recordDeployment } from './network';
 import { createWallet, persistWalletState, unshieldedToken, type WalletContext } from './wallet';
+import { reportSyncProgress } from './sync-progress';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocket } from 'ws';
 import * as Rx from 'rxjs';
@@ -24,7 +25,7 @@ import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-j
 globalThis.WebSocket = WebSocket;
 
 // Identifier under which this contract's private state is stored. The
-// hello-world contract has no witnesses, so its private state is empty ({}).
+// The counter contract has no witnesses, so its private state is empty ({}).
 const PRIVATE_STATE_ID = 'counterPrivateState';
 
 // ─── Network configuration ─────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ const zkConfigPath = path.resolve(__dirname, '..', 'managed');
 const contractPath = path.join(zkConfigPath, 'contract', 'index.js');
 
 if (!fs.existsSync(contractPath)) {
-  console.error('\n❌ Contract not compiled! Run: compact compile\n');
+  console.error('\n❌ Contract not compiled! Run: npm run compile\n');
   process.exit(1);
 }
 
@@ -144,14 +145,17 @@ async function main() {
   console.log('  Syncing with network...');
   console.log('  ℹ  This may take several minutes depending on network size.');
   console.log('     RPC disconnection messages during sync are normal and can be safely ignored.\n');
-  const syncStart = Date.now();
-  const syncInterval = setInterval(() => {
-    const elapsed = Math.round((Date.now() - syncStart) / 1000);
-    process.stdout.write(`\r  ⏳ Still syncing... (${elapsed}s elapsed)   `);
-  }, 5000);
-  const state = await walletCtx.wallet.waitForSyncedState();
-  clearInterval(syncInterval);
-  process.stdout.write('\r  ✓ Synced with network.                                      \n');
+  const reporter = reportSyncProgress(walletCtx.wallet);
+  let state;
+  try {
+    state = await walletCtx.wallet.waitForSyncedState();
+  } catch (err) {
+    reporter.stop();
+    console.error(`\n❌ Sync failed at: ${reporter.summary()}`);
+    throw err;
+  }
+  reporter.stop();
+  console.log('  ✓ Synced with network.\n');
 
   // Persist sync state now so a later deploy failure doesn't waste the sync work.
   await persistWalletState(network, walletCtx);
@@ -284,9 +288,9 @@ async function main() {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       // Midnight.js 4.1.x supplies private state via privateStateId +
-      // initialPrivateState (empty here — the hello-world contract has no
+      // initialPrivateState (empty here — the counter contract has no
       // witnesses). args is the contract constructor's arguments: empty for
-      // hello-world's no-arg constructor. (Statically-typed contracts can omit
+      // the counter's no-arg constructor. (Statically-typed contracts can omit
       // args entirely; this script loads the contract dynamically, so the
       // conditional args type widens to any[] and an explicit [] is required.)
       deployed = await deployContract(providers, {

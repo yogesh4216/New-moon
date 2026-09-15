@@ -29,10 +29,12 @@ docker info >/dev/null 2>&1 \
   || die "Docker is not running. Start Docker Desktop and re-run."
 echo "  docker ok"
 
-curl -sS --max-time 15 -o /dev/null \
-  https://indexer.preprod.midnight.network/api/v4/graphql \
-  || die "Cannot reach indexer.preprod.midnight.network — check your network."
-echo "  preprod reachable"
+# Checks HTTPS *and* both WebSocket endpoints. Wallet sync needs all three, and
+# a proxy that allows HTTPS while blocking wss:// is the usual cause of a sync
+# that never advances.
+node scripts/check-endpoints.mjs preprod \
+  || die "Preprod endpoints are not reachable (see above). Sync cannot complete."
+
 
 # Always sync: a node_modules from an earlier checkout can be missing packages
 # added since. npm is a no-op when it is already up to date.
