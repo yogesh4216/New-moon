@@ -303,6 +303,26 @@ Moving protocol version is not a one-package bump. `wallet-sdk`, `midnight-js`,
 `ledger-vN`, the proof-server image and the compiled contract all have to move
 together.
 
+**Known blocker: Preprod's indexer is older than the v9 SDK (Sept 2026)**
+
+Preprod emits ledger v9, so a v9-capable SDK is required. But every published
+v9 build queries a field Preprod's indexer does not serve yet:
+
+```
+Wallet.Sync: Unknown field "protocolVersion" on type "UnshieldedTransactionsProgress"
+```
+
+That field was added to `wallet-sdk-indexer-client` on 2026-09-16. Builds
+before it omit the field but belong to the 1.2.x line, which cannot read v9 at
+all — and pinning just the indexer client via `overrides` breaks the v2 dust
+wallet, which needs an export (`DustLedgerEventTip`) that only the newer client
+has. The packages move together; there is no working combination to assemble.
+
+So as of this writing **Preprod cannot be deployed to from any published SDK
+combination**. It resolves when Midnight updates the Preprod indexer — no
+change to this repository is needed, and `npm run diagnose-sync` will start
+passing when it happens. Use Preview meanwhile if you need a live contract.
+
 **Telling "slow sync" apart from "not syncing"**
 Read the progress line:
 

@@ -8,6 +8,9 @@
  * whose staying at 0 means sync never starts.
  */
 import { WebSocket } from 'ws';
+import { createRequire } from 'node:module';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { setNetworkId, getNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { resolveNetwork, getOrCreateSeed } from './network';
 import { deriveUnshieldedKeystore } from './wallet';
@@ -20,31 +23,81 @@ const address = deriveUnshieldedKeystore(
   getNetworkId(),
 ).getBech32Address();
 
-const OPS: { name: string; query: string; variables: Record<string, unknown> }[] = [
-  {
-    name: 'ZswapEvents',
-    query: `subscription ZswapEvents($id: Int) {
-      zswapLedgerEvents(id: $id) { id raw protocolVersion maxId }
-    }`,
-    variables: { id: 0 },
-  },
-  {
-    name: 'DustLedgerEvents',
-    query: `subscription DustLedgerEvents($id: Int) {
-      dustLedgerEvents(id: $id) { type: __typename id raw maxId }
-    }`,
-    variables: { id: 0 },
-  },
-  {
-    name: 'UnshieldedTransactions',
-    query: `subscription UnshieldedTransactions($address: UnshieldedAddress!, $transactionId: Int) {
-      unshieldedTransactions(address: $address, transactionId: $transactionId) {
-        ... on UnshieldedTransactionsProgress { type: __typename highestTransactionId }
-      }
-    }`,
-    variables: { address, transactionId: 0 },
-  },
-];
+/**
+ * The subscription documents the installed SDK will actually send.
+ *
+ * Read out of wallet-sdk-indexer-client's generated gql module rather than
+ * copied here, because a copy drifts: an SDK build that adds a field the
+ * deployed indexer does not have is exactly the failure this is meant to
+ * catch, and a hardcoded query would have kept passing while sync died.
+ */
+const findGqlModule = (): string => {
+  const rel = join(
+    '@midnight-ntwrk',
+    'wallet-sdk-indexer-client',
+    'dist',
+    'graphql',
+    'generated',
+    'gql.js',
+  );
+
+  // Walk node_modules rather than resolve(): the package's "exports" map does
+  // not expose this deep path, and npm may hoist it to the top level or nest
+  // it under any dependent. The file is the source of truth either way.
+  const roots = [resolve(process.cwd(), 'node_modules')];
+  const direct = join(roots[0], rel);
+  if (existsSync(direct)) return direct;
+
+  const scope = join(roots[0], '@midnight-ntwrk');
+  if (existsSync(scope)) {
+    for (const pkg of readdirSync(scope)) {
+      const nested = join(scope, pkg, 'node_modules', rel);
+      if (existsSync(nested)) return nested;
+    }
+  }
+
+  throw new Error(
+    'Could not locate wallet-sdk-indexer-client. Run `npm install` and retry.',
+  );
+};
+
+const loadSdkOperations = (): { name: string; query: string }[] => {
+  const src = readFileSync(findGqlModule(), 'utf8');
+  const wanted = ['ZswapEvents', 'DustLedgerEvents', 'UnshieldedTransactions'];
+  const ops: { name: string; query: string }[] = [];
+
+  for (const name of wanted) {
+    // Keys are string literals holding the document, in either quote style,
+    // with newlines escaped as \n by the generator.
+    const at = src.indexOf(`subscription ${name}`);
+    if (at < 0) continue;
+
+    const quote = ['"', "'", '`']
+      .map((q) => ({ q, i: src.lastIndexOf(q, at) }))
+      .filter((c) => c.i >= 0)
+      .sort((a, b) => b.i - a.i)[0];
+    if (!quote) continue;
+
+    const close = src.indexOf(quote.q, at);
+    if (close < 0) continue;
+
+    const query = src
+      .slice(quote.i + 1, close)
+      .replace(/\\n/g, '\n')
+      .replace(/\\"/g, '"');
+    ops.push({ name, query });
+  }
+  return ops;
+};
+
+const OPS: { name: string; query: string; variables: Record<string, unknown> }[] =
+  loadSdkOperations().map((op) => ({
+    ...op,
+    variables:
+      op.name === 'UnshieldedTransactions'
+        ? { address, transactionId: 0 }
+        : { id: 0 },
+  }));
 
 type Outcome = { ok: boolean; detail: string };
 
@@ -107,6 +160,12 @@ for (const op of OPS) {
 }
 
 console.log('\n  ── verdict ─────────────────────────────────────────────');
+if (OPS.length === 0) {
+  console.log('  Could not read any subscription from the installed SDK, so');
+  console.log('  nothing was tested. This is a bug in the diagnostic, not a');
+  console.log('  finding about the network.\n');
+  process.exit(2);
+}
 if (anyFailed) {
   console.log('  At least one wallet subscription is rejected by this indexer.');
   console.log('  That is why sync never starts. If the errors mention unknown');
