@@ -18,6 +18,8 @@ import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config
 import { resolveNetwork, getOrCreateSeed, getDeployment } from './network';
 import { createWallet, persistWalletState, unshieldedToken, type WalletContext } from './wallet';
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js';
+import { createWalletProvider, createMidnightProvider } from '@midnight-ntwrk/midnight-js-types';
+import { seal, unseal } from './ledger-bridge';
 
 // Enable WebSocket for GraphQL subscriptions
 // @ts-expect-error Required for wallet sync
@@ -57,23 +59,35 @@ async function createProviders(walletCtx: WalletContext) {
   // password via PRIVATE_STATE_PASSWORD when you move to a non-local target.
   const privateStatePassword = process.env.PRIVATE_STATE_PASSWORD?.trim() || 'Local-Devnet-Development-Placeholder-1';
 
-  const walletProvider = {
-    // In Midnight.js 4.1.x the WalletProvider interface returns the key objects
-    // (CoinPublicKey / EncPublicKey) directly — no longer hex strings.
-    getCoinPublicKey: () => walletCtx.shieldedSecretKeys.coinPublicKey,
-    getEncryptionPublicKey: () => walletCtx.shieldedSecretKeys.encryptionPublicKey,
-    async balanceTx(tx: any, ttl?: Date) {
-      // balanceUnboundTransaction -> finalizeRecipe is the complete balancing
-      // path in wallet-sdk 1.x; the earlier explicit signRecipe step is gone.
+  // Taken from the facade rather than written as a literal: it reports the
+  // version the chain is actually on, so this follows a fork instead of having
+  // to be edited across one. Resolves immediately once the wallet is synced.
+  const { activeProtocolVersion: protocolVersion } =
+    await walletCtx.wallet.waitForSyncedState();
+
+  // Transaction seams are version-tagged in midnight-js 5.x. Rather than tag
+  // payloads by hand, write the provider against the live v9 runtime and let
+  // these factories narrow inbound payloads, tag outbound ones, and compute
+  // supportedEras from the arms supplied.
+  const walletProvider = createWalletProvider({
+    getCoinPublicKey: () => walletCtx.shieldedKeys.coinPublicKey,
+    getEncryptionPublicKey: () => walletCtx.shieldedKeys.encryptionPublicKey,
+    async balanceTx(tx, ttl) {
+      // balanceUnboundTransaction -> finalizeRecipe is the whole balancing path
+      // in wallet-sdk 2.x; the earlier explicit signRecipe step is gone, and
+      // the facade holds the key material from start(seeds).
       const recipe = await walletCtx.wallet.balanceUnboundTransaction(
-        tx,
-        { shieldedSecretKeys: walletCtx.shieldedSecretKeys, dustSecretKey: walletCtx.dustSecretKey },
+        seal('Unbound', tx, protocolVersion),
         { ttl: ttl ?? new Date(Date.now() + 30 * 60 * 1000) },
       );
-      return walletCtx.wallet.finalizeRecipe(recipe);
+      const finalized = await walletCtx.wallet.finalizeRecipe(recipe);
+      return unseal(finalized, protocolVersion);
     },
-    submitTx: (tx: any) => walletCtx.wallet.submitTransaction(tx) as any,
-  };
+  });
+
+  const midnightProvider = createMidnightProvider((tx) =>
+    walletCtx.wallet.submitTransaction(seal('Finalized', tx, protocolVersion)),
+  );
 
   const zkConfigProvider = new NodeZkConfigProvider(zkConfigPath);
   const accountId = walletCtx.unshieldedKeystore.getBech32Address().toString();
@@ -88,7 +102,7 @@ async function createProviders(walletCtx: WalletContext) {
     zkConfigProvider,
     proofProvider: httpClientProofProvider(networkConfig.proofServer, zkConfigProvider),
     walletProvider,
-    midnightProvider: walletProvider,
+    midnightProvider,
   };
 }
 

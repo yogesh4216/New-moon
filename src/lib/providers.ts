@@ -2,7 +2,10 @@ import type { ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { FetchZkConfigProvider } from '@midnight-ntwrk/midnight-js-fetch-zk-config-provider';
-import { createProofProvider } from '@midnight-ntwrk/midnight-js-types';
+import {
+  createProofProvider,
+  zkConfigToProvingKeyMaterial,
+} from '@midnight-ntwrk/midnight-js-types';
 import { Transaction } from '@midnight-ntwrk/midnight-js-protocol/ledger';
 import { FALLBACK_INDEXER_URI, FALLBACK_INDEXER_WS_URI, ZK_CONFIG_BASE_URL } from '../config';
 
@@ -42,15 +45,35 @@ export const buildProviders = async (wallet: ConnectedAPI, accountId: string) =>
 
   const zkConfigProvider = new FetchZkConfigProvider<'increment' | 'initialize'>(
     ZK_CONFIG_BASE_URL,
-    fetch.bind(window),
+    { fetchFunc: fetch.bind(window) },
   );
 
   // Proving happens inside the wallet, on this device.
-  const provingProvider = await wallet.getProvingProvider({
+  const walletProvingProvider = await wallet.getProvingProvider({
     getZKIR: (loc) => zkConfigProvider.getZKIR(loc as 'increment' | 'initialize'),
     getProverKey: (loc) => zkConfigProvider.getProverKey(loc as 'increment' | 'initialize'),
     getVerifierKey: (loc) => zkConfigProvider.getVerifierKey(loc as 'increment' | 'initialize'),
   });
+
+  // ledger-v9's ProvingProvider adds `lookupKey`, which the DApp connector API
+  // does not implement yet (absent from 4.0.1 and 4.1.0-beta.1 alike). Serve it
+  // from the same ZK config the wallet is already being handed, so proving
+  // still happens in the extension and only key material comes from here.
+  const provingProvider = {
+    check: walletProvingProvider.check.bind(walletProvingProvider),
+    prove: walletProvingProvider.prove.bind(walletProvingProvider),
+    lookupKey: async (keyLocation: string) => {
+      try {
+        const zkConfig = await zkConfigProvider.get(
+          keyLocation as 'increment' | 'initialize',
+        );
+        return zkConfigToProvingKeyMaterial(zkConfig);
+      } catch {
+        // `undefined` is the documented "no key here" answer.
+        return undefined;
+      }
+    },
+  };
 
   return {
     // The default websocket impl resolves to `undefined` under a browser

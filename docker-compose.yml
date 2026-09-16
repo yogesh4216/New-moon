@@ -74,13 +74,18 @@ services:
     # `docker compose up -d --wait` now gates on the proof-server actually
     # listening. The deploy script additionally polls it from the host side
     # before submitting transactions (see waitForProofServer in src/deploy.ts).
-    # Pinned to 8.1.0 (matches the ledger-v8 8.1.0 that Midnight.js 4.1.1
-    # pins client-side). Never bump downward into the 7.x line: proof-server
-    # 7.x (all patches tested: 7.0.0 through 7.0.3) hangs in proof generation
-    # on Apple Silicon Macs running Docker Desktop — the actix worker thread
-    # spins at 100% CPU forever after receiving /prove, with no log output.
-    # Avoid 9.0.0-rc.x tags: pre-release.
-    image: midnightntwrk/proof-server:8.1.0
+    # Pinned to the 9.x line to match ledger-v9, which midnight-js 5.0.0-beta.8
+    # and wallet-sdk 2.0.0-beta.3 link client-side. Preprod emits
+    # "midnight:event[v9]:" ledger events, so an 8.x proof server no longer
+    # matches the chain. This tag is a release candidate because v9 has no
+    # stable release yet; it moves back to a stable tag when one ships.
+    # rc.6 rather than rc.7: rc.7 is published only as per-architecture tags
+    # with no multi-arch manifest, so a plain pull fails on Apple Silicon.
+    # Never bump downward into the 7.x line: proof-server 7.x (all patches
+    # tested: 7.0.0 through 7.0.3) hangs in proof generation on Apple Silicon
+    # Macs running Docker Desktop — the actix worker thread spins at 100% CPU
+    # forever after receiving /prove, with no log output.
+    image: midnightntwrk/proof-server:9.0.0-rc.6
     container_name: mn-demo-proof-server
     command: ["midnight-proof-server -v"]
     ports:

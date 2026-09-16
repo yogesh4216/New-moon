@@ -17,13 +17,12 @@ import { setNetworkId, getNetworkId } from '@midnight-ntwrk/midnight-js-network-
 import {
   WalletFacade,
   DustWallet,
-  HDWallet,
-  Roles,
   ShieldedWallet,
+  UnshieldedWallet,
+  WalletSeeds,
   createKeystore,
   NoOpTransactionHistoryStorage,
   PublicKey,
-  UnshieldedWallet,
 } from '@midnight-ntwrk/wallet-sdk';
 
 import type { NetworkConfig, NetworkId } from './network';
@@ -45,23 +44,23 @@ export {
   WALLET_STATE_VERSION,
 } from './wallet-state';
 
-function deriveKeys(seed: string) {
-  const hdWallet = HDWallet.fromSeed(Buffer.from(seed, 'hex'));
-  if (hdWallet.type !== 'seedOk') throw new Error('Invalid seed');
-  const result = hdWallet.hdWallet
-    .selectAccount(0)
-    .selectRoles([Roles.Zswap, Roles.NightExternal, Roles.Dust])
-    .deriveKeysAt(0);
-  if (result.type !== 'keysDerived') throw new Error('Key derivation failed');
-  hdWallet.hdWallet.clear();
-  return result.keys;
-}
-
 export interface WalletContext {
   wallet: Awaited<ReturnType<typeof WalletFacade.init>>;
-  shieldedSecretKeys: ReturnType<typeof ledger.ZswapSecretKeys.fromSeed>;
-  dustSecretKey: ReturnType<typeof ledger.DustSecretKey.fromSeed>;
+  /**
+   * Per-wallet seeds derived from the master seed. In the forking SDK a seed is
+   * the only key material that crosses a protocol boundary — each ledger
+   * version derives its own keys from it — so this, not a key object, is what
+   * lets a wallet sync either side of the v8/v9 fork.
+   */
+  seeds: ReturnType<typeof WalletSeeds.fromMasterSeed>;
   unshieldedKeystore: ReturnType<typeof createKeystore>;
+  /**
+   * Current-era Zswap keys, derived from the shielded seed. The forking facade
+   * starts from seeds and keeps key material internally, but the Midnight.js
+   * WalletProvider seam still needs the coin and encryption public keys, and
+   * those belong to one ledger version — here, the live one.
+   */
+  shieldedKeys: ReturnType<typeof ledger.ZswapSecretKeys.fromSeed>;
   restored: { shielded: boolean; unshielded: boolean; dust: boolean };
 }
 
@@ -92,11 +91,15 @@ function warnRestoreFailure(kind: ChildKind, err: unknown): void {
 export async function createWallet(opts: CreateWalletOptions): Promise<WalletContext> {
   setNetworkId(opts.networkConfig.networkId);
 
-  const keys = deriveKeys(opts.seed);
   const networkId = getNetworkId();
-  const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(keys[Roles.Zswap]);
-  const dustSecretKey = ledger.DustSecretKey.fromSeed(keys[Roles.Dust]);
-  const unshieldedKeystore = createKeystore(keys[Roles.NightExternal], networkId);
+  const seeds = WalletSeeds.fromMasterSeed(Buffer.from(opts.seed, 'hex'));
+  // 'schnorr' matches the default unshielded role (Roles.NightExternal), which
+  // is the signing scheme valid on both sides of the v8/v9 boundary. 'ecdsa'
+  // exists only from ledger-v9 onwards and would not work pre-fork.
+  const unshieldedKeystore = createKeystore(
+    { kind: 'schnorr', secret: seeds.unshielded },
+    networkId,
+  );
 
   const saved: PersistedWalletState = opts.restore === false
     ? {}
@@ -129,7 +132,7 @@ export async function createWallet(opts: CreateWalletOptions): Promise<WalletCon
           warnRestoreFailure('shielded', err);
         }
       }
-      return cls.startWithSecretKeys(shieldedSecretKeys);
+      return cls.startWithSeed(seeds.shielded);
     },
     unshielded: async (config) => {
       const cls = UnshieldedWallet(config);
@@ -155,13 +158,21 @@ export async function createWallet(opts: CreateWalletOptions): Promise<WalletCon
           warnRestoreFailure('dust', err);
         }
       }
-      return cls.startWithSecretKey(dustSecretKey, ledger.LedgerParameters.initialParameters().dust);
+      return cls.startWithSeed(seeds.dust);
     },
   });
 
-  await wallet.start(shieldedSecretKeys, dustSecretKey);
+  // The facade takes all three seeds; it starts each wallet at whichever side
+  // of the fork the chain reports.
+  await wallet.start(seeds);
 
-  return { wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore, restored };
+  return {
+    wallet,
+    seeds,
+    unshieldedKeystore,
+    shieldedKeys: ledger.ZswapSecretKeys.fromSeed(seeds.shielded),
+    restored,
+  };
 }
 
 /**
