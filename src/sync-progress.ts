@@ -139,8 +139,10 @@ export const reportSyncProgress = (
           `\n  ⚠ After ${Math.round(stalledFor / 1000)}s no wallet has learned the chain height ` +
             `(all showing 0/0).\n` +
             `    This is not a slow sync — it is not starting. Waiting longer will not help.\n` +
-            `    Most likely cause: an unsupported Node version. Check with \`node -v\`;\n` +
-            `    the SDK targets Node 22 LTS. See DEPLOY.md.\n`,
+            `    The usual cause is a ledger protocol mismatch: the network emits a\n` +
+            `    version this install cannot deserialize, so no event is ever applied.\n` +
+            `    Check it with:  npm run check-protocol\n` +
+            `    See DEPLOY.md.\n`,
         );
       } else {
         process.stdout.write(
