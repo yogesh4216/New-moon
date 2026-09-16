@@ -7,25 +7,18 @@
  * `UnshieldedTransactions` is what yields `highestTransactionId`, the value
  * whose staying at 0 means sync never starts.
  */
-import { Buffer } from 'buffer';
 import { WebSocket } from 'ws';
-import { HDWallet, Roles, createKeystore } from '@midnight-ntwrk/wallet-sdk';
 import { setNetworkId, getNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { resolveNetwork, getOrCreateSeed } from './network';
+import { deriveUnshieldedKeystore } from './wallet';
 
 const { network, config } = resolveNetwork();
 setNetworkId(config.networkId);
 
-const seed = getOrCreateSeed(network);
-const hd = HDWallet.fromSeed(Buffer.from(seed, 'hex'));
-if (hd.type !== 'seedOk') throw new Error('invalid seed');
-const derived = hd.hdWallet
-  .selectAccount(0)
-  .selectRoles([Roles.Zswap, Roles.NightExternal, Roles.Dust])
-  .deriveKeysAt(0);
-if (derived.type !== 'keysDerived') throw new Error('key derivation failed');
-hd.hdWallet.clear();
-const address = createKeystore(derived.keys[Roles.NightExternal], getNetworkId()).getBech32Address();
+const address = deriveUnshieldedKeystore(
+  getOrCreateSeed(network),
+  getNetworkId(),
+).getBech32Address();
 
 const OPS: { name: string; query: string; variables: Record<string, unknown> }[] = [
   {

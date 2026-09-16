@@ -1,5 +1,5 @@
 {
-  "// note": "Level 1 CLI tooling (deploy, setup, wallet, cli). Executed through tsx, which strips types rather than checking them. Kept separate from the browser build and deliberately less strict.",
+  "// note": "Node-side tooling (deploy, setup, wallet, CLI, diagnostics). Run through tsx, which strips types rather than checking them, so this config is what checks them. Globbed on purpose: a hand-listed set silently skipped show-address.ts and diagnose-sync.ts, and a stale call there shipped.",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -9,16 +9,18 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"],
-    "lib": ["ES2022"]
+    "types": [
+      "node"
+    ],
+    "lib": [
+      "ES2022"
+    ]
   },
   "include": [
-    "src/cli.ts",
-    "src/deploy-counter.ts",
-    "src/setup.ts",
-    "src/network.ts",
-    "src/wallet.ts",
-    "src/wallet-state.ts",
-    "src/check-balance.ts"
+    "src/*.ts"
+  ],
+  "exclude": [
+    "src/config.ts",
+    "src/vite-env.d.ts"
   ]
 }

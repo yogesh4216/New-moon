@@ -64,6 +64,24 @@ export interface WalletContext {
   restored: { shielded: boolean; unshielded: boolean; dust: boolean };
 }
 
+/**
+ * Derives the unshielded keystore for a seed — the wallet's address, without
+ * building a facade or touching the network.
+ *
+ * Exported so the address-only tools share one derivation with createWallet.
+ * They previously each re-derived it, and drifted when the SDK changed how.
+ */
+export function deriveUnshieldedKeystore(
+  seedHex: string,
+  networkId: ReturnType<typeof getNetworkId>,
+): ReturnType<typeof createKeystore> {
+  const seeds = WalletSeeds.fromMasterSeed(Buffer.from(seedHex, 'hex'));
+  // 'schnorr' matches the default unshielded role (Roles.NightExternal), the
+  // signing scheme valid on both sides of the v8/v9 boundary; 'ecdsa' exists
+  // only from ledger-v9 onwards.
+  return createKeystore({ kind: 'schnorr', secret: seeds.unshielded }, networkId);
+}
+
 export interface CreateWalletOptions {
   network: NetworkId;
   networkConfig: NetworkConfig;
@@ -93,13 +111,7 @@ export async function createWallet(opts: CreateWalletOptions): Promise<WalletCon
 
   const networkId = getNetworkId();
   const seeds = WalletSeeds.fromMasterSeed(Buffer.from(opts.seed, 'hex'));
-  // 'schnorr' matches the default unshielded role (Roles.NightExternal), which
-  // is the signing scheme valid on both sides of the v8/v9 boundary. 'ecdsa'
-  // exists only from ledger-v9 onwards and would not work pre-fork.
-  const unshieldedKeystore = createKeystore(
-    { kind: 'schnorr', secret: seeds.unshielded },
-    networkId,
-  );
+  const unshieldedKeystore = deriveUnshieldedKeystore(opts.seed, networkId);
 
   const saved: PersistedWalletState = opts.restore === false
     ? {}
