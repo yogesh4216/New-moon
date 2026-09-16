@@ -283,6 +283,26 @@ Errors mentioning unknown fields, unknown types, or validation failures mean
 the SDK and the network are on different schema versions. That is fixed by
 aligning versions, not by changing Node.
 
+**Sync at `0/0` with every connectivity check passing — protocol mismatch**
+
+```bash
+npm run check-protocol            # checks preprod and preview
+```
+
+Ledger events carry an ASCII version tag, e.g. `midnight:event[v9]:`. The
+wallet SDK can only deserialize events matching the `ledger-vN` package it was
+built against. If a network emits a version this checkout does not carry, every
+event is rejected, nothing is applied, and the chain height stays 0 — with no
+error that names the real cause.
+
+This is what a healthy connection plus a dead sync looks like: `check-endpoints`
+passes, `diagnose-indexer` passes, `diagnose-sync` passes, and sync still never
+starts.
+
+Moving protocol version is not a one-package bump. `wallet-sdk`, `midnight-js`,
+`ledger-vN`, the proof-server image and the compiled contract all have to move
+together.
+
 **Telling "slow sync" apart from "not syncing"**
 Read the progress line:
 
